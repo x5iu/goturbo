@@ -10,3 +10,4 @@ The currently supported commands include:
   - [x] [lombok](https://github.com/x5iu/visc): Somewhat similar to Java's Project Lombok, it generates getters/setters/constructors for structs.
   - [ ] ……
 - [ ] upgrade: Analyze the changed code to decide the next version, for example, from v1.0.20 to v1.0.21.
+- [x] merge: Merge multiple `.go` files, suitable for streamlining the results of code generation.
