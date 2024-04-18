@@ -6,7 +6,8 @@ import (
 )
 
 var Command = &cobra.Command{
-	Use: "derive",
+	Use:   "derive",
+	Short: "Implementing various interfaces derived for types",
 }
 
 func init() {
