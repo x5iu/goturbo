@@ -330,11 +330,15 @@ func inspectDecls(
 				// breaking change, but not vice versa.
 				var ptrRecv bool
 				if funcDecl.Recv != nil && len(funcDecl.Recv.List) > 0 {
-				recvLoop:
 					for _, recv := range funcDecl.Recv.List {
 						recvTypeExpr := recv.Type
-						for _, ok := recvTypeExpr.(*ast.Ident); !ok; {
+					typeAssert:
+						for {
 							switch typeExpr := recvTypeExpr.(type) {
+							case *ast.Ident:
+								b.WriteString(typeExpr.String())
+								b.WriteByte('_')
+								break typeAssert
 							case *ast.StarExpr:
 								ptrRecv = true
 								recvTypeExpr = typeExpr.X
@@ -344,12 +348,14 @@ func inspectDecls(
 								recvTypeExpr = typeExpr.X
 							case *ast.IndexListExpr:
 								recvTypeExpr = typeExpr.X
+							case *ast.ParenExpr:
+								recvTypeExpr = typeExpr.X
 							default:
-								continue recvLoop
+								b.WriteString(formatExpr(typeExpr))
+								b.WriteByte('_')
+								break typeAssert
 							}
 						}
-						b.WriteString(recvTypeExpr.(*ast.Ident).String())
-						b.WriteByte('_')
 					}
 				}
 				b.WriteString(name)
@@ -597,4 +603,10 @@ func tagDiff(oldTag, newTag *ast.BasicLit) change {
 		return somethingNew
 	}
 	return noChange
+}
+
+func formatExpr(expr ast.Expr) string {
+	var formatter strings.Builder
+	printer.Fprint(&formatter, token.NewFileSet(), expr)
+	return formatter.String()
 }
