@@ -24,6 +24,10 @@ type SemanticVersion struct {
 	Patch int
 }
 
+func (sv SemanticVersion) Valid() bool {
+	return sv.Major > 0 || sv.Minor > 0 || sv.Patch > 0
+}
+
 func (sv SemanticVersion) String() string {
 	return fmt.Sprintf("v%d.%d.%d", sv.Major, sv.Minor, sv.Patch)
 }
