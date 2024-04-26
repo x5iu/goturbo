@@ -10,7 +10,7 @@ import (
 
 var GoTurbo = &cobra.Command{
 	Use:           "goturbo",
-	Version:       "v0.0.6",
+	Version:       "v0.1.0",
 	Short:         "a toolkit designed to enhance the efficiency of Golang development",
 	SilenceUsage:  true,
 	SilenceErrors: true,
