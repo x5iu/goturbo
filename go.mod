@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/spf13/cobra v1.8.0
-	github.com/x5iu/genx v0.6.1
+	github.com/x5iu/genx v0.6.2
 	github.com/x5iu/visc v0.5.1
 	golang.org/x/tools v0.20.0
 )
