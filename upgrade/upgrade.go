@@ -281,6 +281,8 @@ func diff(files []string) (change, error) {
 	return justPatch, nil
 }
 
+const pointerTypePrefix = "PointerType_"
+
 func inspectDecls(
 	file *ast.File,
 	typeMap map[string]*ast.TypeSpec,
@@ -335,37 +337,19 @@ func inspectDecls(
 				var ptrRecv bool
 				if funcDecl.Recv != nil && len(funcDecl.Recv.List) > 0 {
 					for _, recv := range funcDecl.Recv.List {
-						recvTypeExpr := recv.Type
-					typeAssert:
-						for {
-							switch typeExpr := recvTypeExpr.(type) {
-							case *ast.Ident:
-								b.WriteString(typeExpr.String())
-								b.WriteByte('_')
-								break typeAssert
-							case *ast.StarExpr:
-								ptrRecv = true
-								recvTypeExpr = typeExpr.X
-							case *ast.SelectorExpr:
-								recvTypeExpr = typeExpr.Sel
-							case *ast.IndexExpr:
-								recvTypeExpr = typeExpr.X
-							case *ast.IndexListExpr:
-								recvTypeExpr = typeExpr.X
-							case *ast.ParenExpr:
-								recvTypeExpr = typeExpr.X
-							default:
-								b.WriteString(formatExpr(typeExpr))
-								b.WriteByte('_')
-								break typeAssert
-							}
+						typeIdent, isPtr := getTypeIdent(recv.Type)
+						if isPtr {
+							ptrRecv = true
 						}
+						b.WriteString(typeIdent)
+						b.WriteByte('_')
 					}
 				}
 				b.WriteString(name)
-				funcMap[prefix+b.String()] = funcDecl
+				typeStr := b.String()
+				funcMap[prefix+typeStr] = funcDecl
 				if ptrRecv {
-					funcMap[prefix+"ptr_receiver_"+b.String()] = funcDecl
+					funcMap[prefix+pointerTypePrefix+typeStr] = funcDecl
 				}
 			}
 		}
@@ -440,7 +424,7 @@ func posFieldsDiff(oldFields, newFields *ast.FieldList) change {
 	return noChange
 }
 
-func fieldsDiff(oldFields, newFields *ast.FieldList) change {
+func namedFieldsDiff(oldFields, newFields *ast.FieldList) change {
 	if oldFields == nil && newFields == nil {
 		return noChange
 	}
@@ -454,14 +438,36 @@ func fieldsDiff(oldFields, newFields *ast.FieldList) change {
 		oldFieldsMap = make(map[string]*ast.Field)
 		newFieldsMap = make(map[string]*ast.Field)
 	)
+	// For anonymous fields, we use their type name as the field name,
+	// along with a prefix indicating whether it is a pointer type.
 	for _, field := range oldFields.List {
-		for _, name := range field.Names {
-			oldFieldsMap[name.String()] = field
+		if field.Names == nil {
+			if field.Type != nil {
+				typeIdent, isPtr := getTypeIdent(field.Type)
+				if isPtr {
+					typeIdent = pointerTypePrefix + typeIdent
+				}
+				oldFieldsMap[typeIdent] = field
+			}
+		} else {
+			for _, name := range field.Names {
+				oldFieldsMap[name.String()] = field
+			}
 		}
 	}
 	for _, field := range newFields.List {
-		for _, name := range field.Names {
-			newFieldsMap[name.String()] = field
+		if field.Names == nil {
+			if field.Type != nil {
+				typeIdent, isPtr := getTypeIdent(field.Type)
+				if isPtr {
+					typeIdent = pointerTypePrefix + typeIdent
+				}
+				newFieldsMap[typeIdent] = field
+			}
+		} else {
+			for _, name := range field.Names {
+				newFieldsMap[name.String()] = field
+			}
 		}
 	}
 	for name, oldField := range oldFieldsMap {
@@ -529,7 +535,7 @@ func typeExprDiff(oldTypeExpr, newTypeExpr ast.Expr) change {
 		if oldStructType.Incomplete != newStructType.Incomplete {
 			return breakingChange
 		}
-		if fieldsChange := fieldsDiff(oldStructType.Fields, newStructType.Fields); fieldsChange != noChange {
+		if fieldsChange := namedFieldsDiff(oldStructType.Fields, newStructType.Fields); fieldsChange != noChange {
 			return fieldsChange
 		}
 	case *ast.FuncType:
@@ -550,7 +556,7 @@ func typeExprDiff(oldTypeExpr, newTypeExpr ast.Expr) change {
 		if oldInterfaceType.Incomplete != newInterfaceType.Incomplete {
 			return breakingChange
 		}
-		if fieldsChange := fieldsDiff(oldInterfaceType.Methods, newInterfaceType.Methods); fieldsChange != noChange {
+		if fieldsChange := namedFieldsDiff(oldInterfaceType.Methods, newInterfaceType.Methods); fieldsChange != noChange {
 			return breakingChange
 		}
 	case *ast.MapType:
@@ -607,6 +613,38 @@ func tagDiff(oldTag, newTag *ast.BasicLit) change {
 		return somethingNew
 	}
 	return noChange
+}
+
+func getTypeIdent(expr ast.Expr) (ident string, isPtr bool) {
+	var b strings.Builder
+loop:
+	for {
+		switch typeExpr := expr.(type) {
+		case *ast.Ident:
+			b.WriteString(typeExpr.String())
+			break loop
+		case *ast.StarExpr:
+			isPtr = true
+			expr = typeExpr.X
+		case *ast.SelectorExpr:
+			// In order to handle types with the same name under different packages,
+			// we need to include SelectorExpr.X as part of the type name as well.
+			x, _ := getTypeIdent(typeExpr.X)
+			b.WriteString(x)
+			b.WriteString(typeExpr.Sel.String())
+			break loop
+		case *ast.IndexExpr:
+			expr = typeExpr.X
+		case *ast.IndexListExpr:
+			expr = typeExpr.X
+		case *ast.ParenExpr:
+			expr = typeExpr.X
+		default:
+			b.WriteString(formatExpr(typeExpr))
+			break loop
+		}
+	}
+	return b.String(), isPtr
 }
 
 func formatExpr(expr ast.Expr) string {
