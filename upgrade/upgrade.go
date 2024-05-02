@@ -91,6 +91,11 @@ func parse(s string) (sv SemanticVersion, err error) {
 	return sv, nil
 }
 
+type changedDir struct {
+	Olds []string
+	News []string
+}
+
 func detectChange() (change, error) {
 	files, err := gitChangedFiles()
 	if err != nil {
@@ -99,16 +104,32 @@ func detectChange() (change, error) {
 	// Divide files in the same directory into a group, because usually .go files in
 	// the same directory belong to the same go package.
 	var (
-		dirFileMap = make(map[string][]string)
+		dirFileMap = make(map[string]*changedDir)
 	)
 	for _, file := range files {
-		dir := filepath.Dir(file)
-		dirFileMap[dir] = append(dirFileMap[dir], file)
+		if oldFile := file.Old; oldFile != "" {
+			dir := filepath.Dir(oldFile)
+			chd, ok := dirFileMap[dir]
+			if !ok {
+				chd = &changedDir{}
+			}
+			chd.Olds = append(chd.Olds, oldFile)
+			dirFileMap[dir] = chd
+		}
+		if newFile := file.New; newFile != "" {
+			dir := filepath.Dir(newFile)
+			chd, ok := dirFileMap[dir]
+			if !ok {
+				chd = &changedDir{}
+			}
+			chd.News = append(chd.News, newFile)
+			dirFileMap[dir] = chd
+		}
 	}
 	var topChange change
-	for _, files = range dirFileMap {
+	for _, chd := range dirFileMap {
 		var fileChange change
-		fileChange, err = diff(files)
+		fileChange, err = diff(chd)
 		if err != nil {
 			return noChange, err
 		}
@@ -119,11 +140,16 @@ func detectChange() (change, error) {
 	return topChange, nil
 }
 
+type changedFile struct {
+	Old string
+	New string
+}
+
 var (
 	ErrFileDoesNotExist = errors.New("file does not exist")
 )
 
-func gitChangedFiles() ([]string, error) {
+func gitChangedFiles() ([]changedFile, error) {
 	var (
 		stdout bytes.Buffer
 		stderr bytes.Buffer
@@ -134,13 +160,35 @@ func gitChangedFiles() ([]string, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("git status: %w", err)
 	}
-	files := make([]string, 0, 8)
+	files := make([]changedFile, 0, 8)
 	scanner := bufio.NewScanner(&stdout)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) > 0 {
-			if file := fields[len(fields)-1]; filepath.Ext(file) == ".go" {
-				files = append(files, file)
+		if len(fields) >= 2 {
+			status := fields[0]
+			if strings.Contains(status, "R") && len(fields) >= 4 {
+				oldFile, newFile := fields[1], fields[3]
+				if filepath.Ext(oldFile) == ".go" {
+					files = append(files, changedFile{
+						Old: oldFile,
+						New: newFile,
+					})
+				}
+			} else if strings.Contains(status, "D") {
+				if oldFile := fields[len(fields)-1]; filepath.Ext(oldFile) == ".go" {
+					files = append(files, changedFile{Old: oldFile})
+				}
+			} else if strings.Contains(status, "C") {
+				if newFile := fields[len(fields)-1]; filepath.Ext(newFile) == ".go" {
+					files = append(files, changedFile{New: newFile})
+				}
+			} else {
+				if modifiedFile := fields[len(fields)-1]; filepath.Ext(modifiedFile) == ".go" {
+					files = append(files, changedFile{
+						Old: modifiedFile,
+						New: modifiedFile,
+					})
+				}
 			}
 		}
 	}
@@ -176,7 +224,7 @@ const (
 	breakingChange
 )
 
-func diff(files []string) (change, error) {
+func diff(chd *changedDir) (change, error) {
 	var (
 		oldFileSet = token.NewFileSet()
 		newFileSet = token.NewFileSet()
@@ -196,26 +244,33 @@ func diff(files []string) (change, error) {
 	)
 	// Compare all *ast.Decl under the same package uniformly to handle the situation
 	// where a *ast.Decl migrates from one file to another.
-	for _, file := range files {
+	for _, oldFile := range chd.Olds {
 		// Attempting to find the "previous" commit record of the currently changed file in the git history,
 		// and parse its content into *ast.File (this will not be executed for new files, as new files do
 		// not have a git history of commits).
-		oldFileSrc, err := gitShow("HEAD", file)
-		if err != nil && !errors.Is(err, ErrFileDoesNotExist) {
-			return noChange, err
+		if oldFile != "" {
+			oldFileSrc, err := gitShow("HEAD", oldFile)
+			if err != nil && !errors.Is(err, ErrFileDoesNotExist) {
+				return noChange, err
+			}
+			if oldFileSrc != nil {
+				oldAst, err = parser.ParseFile(oldFileSet, oldFile, oldFileSrc, 0)
+				if err != nil {
+					return noChange, err
+				}
+				inspectDecls(oldAst, oldTypeMap, oldVarMap, oldFuncMap)
+			}
 		}
-		if oldFileSrc != nil {
-			oldAst, err = parser.ParseFile(oldFileSet, file, oldFileSrc, 0)
+	}
+	for _, newFile := range chd.News {
+		if newFile != "" {
+			var err error
+			newAst, err = parser.ParseFile(newFileSet, newFile, nil, 0)
 			if err != nil {
 				return noChange, err
 			}
-			inspectDecls(oldAst, oldTypeMap, oldVarMap, oldFuncMap)
+			inspectDecls(newAst, newTypeMap, newVarMap, newFuncMap)
 		}
-		newAst, err = parser.ParseFile(newFileSet, file, nil, 0)
-		if err != nil {
-			return noChange, err
-		}
-		inspectDecls(newAst, newTypeMap, newVarMap, newFuncMap)
 	}
 	var addition bool
 	for name, oldTypeSpec := range oldTypeMap {
