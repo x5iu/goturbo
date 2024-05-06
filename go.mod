@@ -1,11 +1,11 @@
 module github.com/x5iu/goturbo
 
-go 1.22
+go 1.19
 
 require (
 	github.com/spf13/cobra v1.8.0
 	github.com/x5iu/genx v0.6.2
-	github.com/x5iu/visc v0.5.1
+	github.com/x5iu/visc v0.6.0
 	golang.org/x/tools v0.20.0
 )
 
