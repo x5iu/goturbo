@@ -18,7 +18,7 @@ var (
 
 var Command = &cobra.Command{
 	Use:     "upgrade version",
-	Version: "v0.1.2",
+	Version: "v0.1.3",
 	Short:   "A tool used to determine the next semantic version.",
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) (err error) {

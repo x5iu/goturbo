@@ -389,6 +389,13 @@ func inspectDecls(
 				// to the value type receiver of Receiver; this also means that if the receiver of a
 				// method changes from a pointer receiver to a value receiver, it is considered as a
 				// breaking change, but not vice versa.
+				//
+				// [IMPORTANT]
+				// After careful consideration, I have finally realized that actually changing the
+				// value type receiver to a pointer type receiver is also a breaking change.
+				// Therefore, now when the receiver is of pointer type, we will not automatically
+				// add a value type receiver. Value type receivers and pointer type receivers will
+				// not coexist, and any changes between them are considered breaking changes.
 				var ptrRecv bool
 				if funcDecl.Recv != nil && len(funcDecl.Recv.List) > 0 {
 					for _, recv := range funcDecl.Recv.List {
@@ -402,9 +409,10 @@ func inspectDecls(
 				}
 				b.WriteString(name)
 				typeStr := b.String()
-				funcMap[prefix+typeStr] = funcDecl
 				if ptrRecv {
 					funcMap[prefix+pointerTypePrefix+typeStr] = funcDecl
+				} else {
+					funcMap[prefix+typeStr] = funcDecl
 				}
 			}
 		}
